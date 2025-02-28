@@ -1,0 +1,48 @@
+@Grab(group='org.codehaus.groovy.modules.http-builder', module='http-builder', version='0.7.1')
+import groovyx.net.http.RESTClient
+import groovyx.net.http.ContentType
+// Define the properties
+def hostname = 'your-hostname'
+def port = 'your-port'
+def username = 'your-username'
+def password = 'your-password'
+def resource = 'your-resource'
+def tokenUrl = 'your-token-url'
+def scope = 'your-scope'
+def grantType = 'your-grant-type'
+def clientID = 'your-clientID'
+def clientSecret = 'your-clientSecret'
+def oAuthusername = 'your-oAuthusername'
+def oAuthpassword = 'your-oAuthpassword'
+// Obtain OAuth token
+def getToken = new RESTClient(tokenUrl)
+def tokenResponse = getToken.post(
+    body: [
+        grant_type: grantType,
+        client_id: clientID,
+        client_secret: clientSecret,
+        username: oAuthusername,
+        password: oAuthpassword,
+        scope: scope
+    ],
+    requestContentType: ContentType.URLENC
+)
+def accessToken = tokenResponse.data.access_token
+// Set up the REST client
+def odmClient = new RESTClient("https://${hostname}:${port}/res/api/v1/")
+odmClient.headers['Authorization'] = "Bearer ${accessToken}"
+// Construct the resource path
+def path = resource.split('/').size() in [2, 4] ? "ruleapps/${resource}" : null
+if (path == null) {
+    println '[Error] Resource format invalid.'
+    System.exit(1)
+}
+// Delete the resource
+def response = odmClient.delete(path: path)
+if (response.status == 200) {
+    println "[Ok] ${resource} deleted."
+    System.exit(0)
+} else {
+    println '[Error] Could not delete resource.'
+    System.exit(1)
+}
