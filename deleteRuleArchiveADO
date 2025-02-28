@@ -1,0 +1,47 @@
+trigger:
+- main
+pool:
+  vmImage: 'ubuntu-latest'
+variables:
+  hostname: 'your-hostname'
+  port: 'your-port'
+  username: 'your-username'
+  password: 'your-password'
+  resource: 'your-resource'
+  tokenUrl: 'your-token-url'
+  scope: 'your-scope'
+  grantType: 'your-grant-type'
+  clientID: 'your-clientID'
+  clientSecret: 'your-clientSecret'
+  oAuthusername: 'your-oAuthusername'
+  oAuthpassword: 'your-oAuthpassword'
+steps:
+- task: PowerShell@2
+  inputs:
+    targetType: 'inline'
+    script: |
+      # Obtain OAuth token
+      $tokenResponse = Invoke-RestMethod -Method Post -Uri $env:tokenUrl -ContentType 'application/x-www-form-urlencoded' -Body @{
+        grant_type = $env:grantType
+        client_id = $env:clientID
+        client_secret = $env:clientSecret
+        username = $env:oAuthusername
+        password = $env:oAuthpassword
+        scope = $env:scope
+      }
+      $accessToken = $tokenResponse.access_token
+# Set up the REST client
+      $headers = @{
+        Authorization = "Bearer $accessToken"
+      }
+# Construct the resource path
+      $path = if ($env:resource -split '/').Length -eq 2 -or ($env:resource -split '/').Length -eq 4 { "ruleapps/$($env:resource)" } else { Write-Error "Resource format invalid."; exit 1 }
+# Delete the resource
+      $response = Invoke-RestMethod -Method Delete -Uri "https://$($env:hostname):$($env:port)/res/api/v1/$path" -Headers $headers
+      if ($response.StatusCode -eq 200) {
+        Write-Output "[Ok] $($env:resource) deleted."
+        exit 0
+      } else {
+        Write-Error "Could not delete resource."
+        exit 1
+      }
