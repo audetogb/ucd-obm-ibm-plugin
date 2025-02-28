@@ -1,0 +1,86 @@
+import java.net.HttpURLConnection
+import java.net.URL
+import java.io.OutputStream
+import java.nio.file.Files
+import java.nio.file.Paths
+
+// Function to make HTTP GET request
+def makeGetRequest(urlString, username, password) {
+    URL url = new URL(urlString)
+    HttpURLConnection connection = (HttpURLConnection) url.openConnection()
+    connection.setRequestMethod("GET")
+    connection.setRequestProperty("Authorization", "Basic " + "${username}:${password}".bytes.encodeBase64().toString())
+
+    int responseCode = connection.getResponseCode()
+    String response = connection.inputStream.text
+    connection.disconnect()
+    return [responseCode, response]
+}
+
+// Get step properties (replace with actual values or method to retrieve them)
+def inProps = [
+    hostname: System.getenv('ODM_HOSTNAME'),
+    port: System.getenv('ODM_PORT'),
+    username: System.getenv('ODM_USERNAME'),
+    password: System.getenv('ODM_PASSWORD'),
+    resource: System.getenv('ODM_RESOURCE')
+]
+
+String hostname = inProps['hostname']
+String port = inProps['port']
+String username = inProps['username']
+String password = inProps['password']
+String resource = inProps['resource']
+
+String[] resourceArray = resource.split('/')
+String path = "res/api/v1/ruleapps/${resource}"
+String downloadName
+String versionNumber
+
+// Determine the highest version if not specified
+if (resourceArray.size() == 1 || resourceArray.size() == 3) {
+    String highestVersionPath = "http://${hostname}:${port}/${path}/highest"
+    def (responseCode, response) = makeGetRequest(highestVersionPath, username, password)
+    if (responseCode == 200) {
+        versionNumber = response
+        path += "/${versionNumber}"
+        downloadName = "ruleApp_${resourceArray[0]}_${versionNumber}.jar"
+    } else {
+        println ("[Error] Not able to determine highest version for resource: ${resource}")
+        System.exit(1)
+    }
+} else if (resourceArray.size() == 2 || resourceArray.size() == 4) {
+    downloadName = "ruleApp_${resourceArray[0]}_${resourceArray[1]}.jar"
+} else {
+    println ('[Error] Resource format invalid.')
+    System.exit(1)
+}
+
+String archivePath = "http://${hostname}:${port}/${path}/archive"
+def (responseCode, response) = makeGetRequest(archivePath, username, password)
+if (responseCode == 200) {
+    Files.write(Paths.get(downloadName), response.bytes)
+    println ("[Ok] Resource fetched.")
+} else {
+    println ('[Error] Could not fetch resource.')
+    System.exit(1)
+}
+
+// Get properties associated with resource
+String propsPath = "http://${hostname}:${port}/${path}/properties"
+def (propsResponseCode, propsResponse) = makeGetRequest(propsPath, username, password)
+if (propsResponseCode == 200) {
+    def ruleProps = new groovy.json.JsonSlurper().parseText(propsResponse)
+    if (ruleProps.size() > 0) {
+        ruleProps.each { prop ->
+            println ('[Info] Property found: ' + prop.id.toString())
+            // Set output properties (this part depends on your environment)
+        }
+        println ("[Ok] Properties set.")
+    } else {
+        println ('[Info] No properties found for resource')
+    }
+} else {
+    println ('[Error] Could not fetch properties.')
+    System.exit(1)
+}
