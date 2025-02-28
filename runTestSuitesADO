@@ -1,0 +1,100 @@
+trigger:
+- main
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+variables:
+  ODM_HOSTNAME: 'your-hostname'
+  ODM_PORT: 'your-port'
+  ODM_USERNAME: 'your-username'
+  ODM_PASSWORD: 'your-password'
+  ODM_DECISION_SERVICE_NAME: 'your-decision-service-name'
+  ODM_TEST_SUITE_NAMES: 'your-test-suite-names'
+
+steps:
+- script: |
+    import java.net.HttpURLConnection
+    import java.net.URL
+    import java.io.OutputStream
+    import groovy.json.JsonSlurper
+
+    // Function to make HTTP GET request
+    def makeGetRequest(urlString, username, password) {
+        URL url = new URL(urlString)
+        HttpURLConnection connection = (HttpURLConnection) url.openConnection()
+        connection.setRequestMethod("GET")
+        connection.setRequestProperty("Authorization", "Basic " + "${username}:${password}".bytes.encodeBase64().toString())
+
+        int responseCode = connection.getResponseCode()
+        String response = connection.inputStream.text
+        connection.disconnect()
+        return [responseCode, response]
+    }
+
+    // Function to make HTTP POST request
+    def makePostRequest(urlString, payload, username, password) {
+        URL url = new URL(urlString)
+        HttpURLConnection connection = (HttpURLConnection) url.openConnection()
+        connection.setRequestMethod("POST")
+        connection.setDoOutput(true)
+        connection.setRequestProperty("Content-Type", "application/json")
+        connection.setRequestProperty("Authorization", "Basic " + "${username}:${password}".bytes.encodeBase64().toString())
+
+        OutputStream os = connection.getOutputStream()
+        os.write(payload.getBytes("UTF-8"))
+        os.close()
+
+        int responseCode = connection.getResponseCode()
+        String response = connection.inputStream.text
+        connection.disconnect()
+        return [responseCode, response]
+    }
+
+    // Get step properties from environment variables
+    def inProps = [
+        hostname: System.getenv('ODM_HOSTNAME'),
+        port: System.getenv('ODM_PORT'),
+        username: System.getenv('ODM_USERNAME'),
+        password: System.getenv('ODM_PASSWORD'),
+        decisionServiceName: System.getenv('ODM_DECISION_SERVICE_NAME'),
+        testSuiteNames: System.getenv('ODM_TEST_SUITE_NAMES')
+    ]
+
+    String hostname = inProps['hostname']
+    String port = inProps['port']
+    String username = inProps['username']
+    String password = inProps['password']
+    String decisionServiceName = inProps['decisionServiceName']
+    String testSuiteNames = inProps['testSuiteNames'].replaceAll('\n|[\n]|\r\n|[\r\n]', ',').split(',')*.trim()
+
+    // Fetch decision service ID
+    String decisionServiceUri = "http://${hostname}:${port}/decisioncenter-api/v1/decisionservices?q=name:${decisionServiceName}"
+    def (responseCode, response) = makeGetRequest(decisionServiceUri, username, password)
+    if (responseCode != 200) {
+        println ('[Error] Could not fetch decision service.')
+        System.exit(1)
+    }
+    def decisionService = new JsonSlurper().parseText(response)[0]
+    String decisionServiceId = decisionService.id
+
+    // Run test suites
+    boolean allTestsPassed = true
+    testSuiteNames.each { testSuiteName ->
+        String testSuiteUri = "http://${hostname}:${port}/decisioncenter-api/v1/decisionservices/${decisionServiceId}/testsuites/${testSuiteName}/run"
+        def (testResponseCode, testResponse) = makePostRequest(testSuiteUri, '', username, password)
+        if (testResponseCode != 200) {
+            allTestsPassed = false
+            println ("[Error] Test suite ${testSuiteName} failed.")
+        } else {
+            println ("[Ok] Test suite ${testSuiteName} ran successfully.")
+        }
+    }
+
+    if (allTestsPassed) {
+        println ("[Ok] All test suites ran successfully.")
+        System.exit(0)
+    } else {
+        println ('[Error] Some test suites failed.')
+        System.exit(1)
+  displayName: 'Run ODM Test Suites'
